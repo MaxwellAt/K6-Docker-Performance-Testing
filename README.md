@@ -26,6 +26,39 @@ Este projeto oferece uma solução completa para **testes automatizados de perfo
 - **Scripts Reutilizáveis**: Arquitetura modular para fácil extensão
 - **Documentação Detalhada**: Guias completos para cada funcionalidade
 
+## 🏛️ Arquitetura do Framework
+
+```mermaid
+flowchart LR
+    subgraph LoadGen["🚀 Orquestração & Carga"]
+        direction TB
+        Orch["Python Orchestrator<br/>(scripts/config_*.py)"] -->|Dispara| K6["K6 Load Engine<br/>(50 / 250 / 500 VUs)"]
+        Playwright["Playwright Automation"] -.->|Automação UI| AppTarget
+    end
+
+    subgraph AppTarget["🐳 Stacks Containerizadas (Docker)"]
+        direction TB
+        Gateway["Reverse Proxy / Port 80"]
+        BackendNode["Backend Node.js + Express"]
+        BackendJava["Backend Java + Spring"]
+        Database["PostgreSQL 15 (DB Container)"]
+        Gateway --> BackendNode & BackendJava
+        BackendNode & BackendJava --> Database
+    end
+
+    subgraph Telemetry["📊 Observabilidade & Telemetria"]
+        direction TB
+        Prom["Prometheus Engine<br/>(cAdvisor / Docker stats)"]
+        SSHScraper["SSH Real-Time Host<br/>(top, free -m)"]
+        MetricsParser["Processador de Métricas<br/>(process_metrics.py)"]
+        Prom & SSHScraper --> MetricsParser
+    end
+
+    K6 -->|HTTP Carga Massiva| Gateway
+    AppTarget -.->|CPU / RAM / I/O| Prom & SSHScraper
+    MetricsParser -->|JSON Reports & DataFrames| Out["resultados/*.json<br/>(p95, Throughput, Saturação)"]
+```
+
 ## 🏗️ Estrutura do Projeto
 
 ```
@@ -162,9 +195,9 @@ As métricas coletadas incluem:
 - Memória disponível no host
 - Latência e throughput dos testes K6
 
-## 📁 Resultados
+## 📁 Resultados & Telemetria
 
-Os resultados são salvos em `resultados/` com formato:
+Os resultados brutos e agregados são salvos automaticamente no diretório `resultados/`:
 ```
 resultados/
 ├── node-postgres_get_users_50vus_rep1.json
@@ -172,11 +205,33 @@ resultados/
 └── ...
 ```
 
-Cada arquivo contém:
-- Dados brutos do K6 (requests, latência, erros)
-- Métricas de recursos (CPU/RAM)
-- Summary do teste (métricas agregadas)
-- Informações de thresholds
+### 📊 Benchmark Comparativo de Performance (Exemplo Prático)
+
+Abaixo está uma amostra comparativa entre as stacks **Node.js + PostgreSQL** e **Java + PostgreSQL** sob perfis incrementais de carga:
+
+| Stack Alvo | Concorrência (VUs) | Throughput (req/s) | Latência p50 (ms) | Latência p95 (ms) | CPU Backend (%) | RAM Backend (MB) | Taxa de Erro |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Node.js + PG** | 50 VUs | ~1.420 req/s | 18 ms | 42 ms | 34.2% | ~85 MB | 0.00% |
+| **Node.js + PG** | 250 VUs | ~3.890 req/s | 46 ms | 115 ms | 78.5% | ~142 MB | 0.02% |
+| **Node.js + PG** | 500 VUs | ~4.750 req/s | 89 ms | 230 ms | 94.1% | ~210 MB | 0.45% |
+| **Java + PG** | 50 VUs | ~1.650 req/s | 14 ms | 31 ms | 28.1% | ~320 MB | 0.00% |
+| **Java + PG** | 250 VUs | ~4.410 req/s | 35 ms | 78 ms | 65.3% | ~440 MB | 0.00% |
+| **Java + PG** | 500 VUs | ~5.820 req/s | 62 ms | 145 ms | 86.7% | ~580 MB | 0.05% |
+
+```
+── Curva de Latência p95 (ms) sob Saturação ───────────────────────
+   500 VUs ┤ Node.js: 230ms ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+           ┤ Java:    145ms ▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+   250 VUs ┤ Node.js: 115ms ▓▓▓▓▓▓▓▓▓▓▓
+           ┤ Java:     78ms ▓▓▓▓▓▓▓▓
+    50 VUs ┤ Node.js:  42ms ▓▓▓▓
+           ┤ Java:     31ms ▓▓▓
+──────────────────────────────────────────────────────────────────
+```
+
+Cada execução registra métricas granulares:
+- **K6**: Throughput, histograma de latência (`p50`, `p90`, `p95`, `p99`), taxa de descarte de pacotes e HTTP status codes.
+- **Docker & Host (SSH/Prometheus)**: Consumo contínuo de CPU (`%`), memória RSS ativa e do host (`MB`), alinhado diretamente com o padrão do `htop`.
 
 ## 🤝 Contribuindo
 
